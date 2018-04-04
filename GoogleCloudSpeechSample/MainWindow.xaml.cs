@@ -16,9 +16,10 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Windows.Media;
 using System.Drawing.Imaging;
-
-
-
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net;
+using NAudio.Wave;
 
 namespace GoogleCloudSpeechSample
 {
@@ -32,10 +33,28 @@ namespace GoogleCloudSpeechSample
 
         private GoogleCredential credential = GoogleCredential.FromJson(File.ReadAllText("StreamingTest-a4691d19df64.json"));
         private Channel channel;
-    
+
+        static HttpMethod apiMethod = HttpMethod.Post;
+        static string apiEndPointURL = "https://api.apigw.smt.docomo.ne.jp/aiTalk/v1/textToSpeech?APIKEY=";
+        static string apiKey = "xxx";
+
+        static string apiContentType = "application/ssml+xml";
+        static string apiAccept = "audio/L16";
+
+        private int selectMicrophoneNubmer;
+
         public MainWindow()
         {
             InitializeComponent();
+            List<string> deviceList = new List<string>();
+            for (int i = 0; i < WaveIn.DeviceCount; i++)
+            {
+                var deviceInfo = WaveIn.GetCapabilities(i);
+                Console.WriteLine("device number = " + i + " : " + "product name = " + deviceInfo.ProductName);
+                MicrophoneSelectList.Items.Add(deviceInfo.ProductName);
+            }
+            MicrophoneSelectList.SelectedIndex = 0;
+            selectMicrophoneNubmer = 0;
 
             StartRecButton.IsEnabled = true;
             EndRecButton.IsEnabled = false;
@@ -116,7 +135,7 @@ namespace GoogleCloudSpeechSample
             object writeLock = new object();
             bool writeMore = true;
             NAudio.Wave.WaveInEvent waveIn = new NAudio.Wave.WaveInEvent();
-            waveIn.DeviceNumber = 0;
+            waveIn.DeviceNumber = selectMicrophoneNubmer;
             waveIn.WaveFormat = new NAudio.Wave.WaveFormat(16000, 1);
             waveIn.DataAvailable += (object sender, NAudio.Wave.WaveInEventArgs args) =>
             {
@@ -157,14 +176,88 @@ namespace GoogleCloudSpeechSample
             
         }
 
-        private void RadioSample1_Checked(object sender, RoutedEventArgs e)
+        private void RequestTextToSpeech()
         {
+            string textBySSML = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<speak version=""1.1"">
+    <voice name=""koutarou"">
+        <prosody pitch=""1.2"" volume=""1.1"">"
+            + textBox.Text +
+        @"</prosody>
+    </voice>
+</speak>";
 
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            byte[] bytesBySSML = Encoding.UTF8.GetBytes(textBySSML);
+
+            string lpcmFilePath = $@"C:\VoiceData\AITalkR{DateTime.Now.ToString("yyyyMMddHHmmss")}.lpcm";
+            var sbResponseHeader = new StringBuilder();
+            var isSuccessResponse = false;
+
+            using (HttpClient client = new HttpClient())
+            {
+                var request = new HttpRequestMessage(apiMethod, apiEndPointURL + apiKey);
+                request.Content = new ByteArrayContent(bytesBySSML);
+
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue(apiContentType);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(apiAccept));
+
+                try
+                {
+                    var asyncSendTask = client.SendAsync(request);
+                    asyncSendTask.Wait();
+
+                    sbResponseHeader.AppendLine($"HTTP-Status-Code:{asyncSendTask.Result.StatusCode}");
+                    foreach(var headerItem in asyncSendTask.Result.Headers)
+                    {
+                        var headkey = headerItem.Key;
+                        var headValue = String.Join(",", headerItem.Value);
+                        sbResponseHeader.AppendLine($"{headkey}:{headValue}");
+                    }
+                    if(asyncSendTask.Result.StatusCode == HttpStatusCode.OK)
+                    {
+                        isSuccessResponse = true;
+                        var msgResponseBody = asyncSendTask.Result.Content;
+                        var stmResponseBody = msgResponseBody.ReadAsStreamAsync().GetAwaiter().GetResult();
+                        using(BinaryReader reader = new BinaryReader(stmResponseBody))
+                        {
+                            Byte[] lnByte = reader.ReadBytes(1 * 1024 * 1024 * 10);
+                            using (FileStream lxFS = new FileStream(lpcmFilePath, FileMode.Create))
+                            {
+                                lxFS.Write(lnByte, 0, lnByte.Length);
+                            }
+                        }
+                    }
+                }catch(Exception ex)
+                {
+                    Console.WriteLine("エラー発生\n" + ex.Message);
+                }
+                finally
+                {
+                    if (isSuccessResponse)
+                    {
+                        Console.WriteLine($"【レスポンスヘッダ】\n{sbResponseHeader.ToString()}\n" + $"【レスポンスボディ】\n{lpcmFilePath}\n");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"【レスポンスヘッダ】\n{sbResponseHeader.ToString()}");
+                    }
+                }
+                Console.Read();
+            }
         }
 
-        private void RadioSample2_Checked(object sender, RoutedEventArgs e)
-        {
 
+        private void SpeechStartButton_Click(object sender, RoutedEventArgs e)
+        {
+            RequestTextToSpeech();
+        }
+
+        private void MicrophoneSelectList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            SpeechTextBlock.Text = "使用するマイクは" + MicrophoneSelectList.SelectedIndex + "番";
+            selectMicrophoneNubmer = MicrophoneSelectList.SelectedIndex;
         }
     }
 }
+
