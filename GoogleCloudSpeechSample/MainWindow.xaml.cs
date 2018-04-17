@@ -20,6 +20,8 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net;
 using NAudio.Wave;
+using System.Windows.Forms.DataVisualization.Charting;
+using System.Media;
 
 namespace GoogleCloudSpeechSample
 {
@@ -53,10 +55,6 @@ namespace GoogleCloudSpeechSample
                 Console.WriteLine("device number = " + i + " : " + "product name = " + deviceInfo.ProductName);
                 MicrophoneSelectList.Items.Add(deviceInfo.ProductName);
             }
-            MicrophoneSelectList.SelectedIndex = 0;
-            selectMicrophoneNubmer = 0;
-
-            StartRecButton.IsEnabled = true;
             EndRecButton.IsEnabled = false;
 
             credential = credential.CreateScoped("https://www.googleapis.com/auth/cloud-platform");
@@ -64,24 +62,38 @@ namespace GoogleCloudSpeechSample
         }
                 
         private void StartRecButton_Click(object sender, RoutedEventArgs e)
-        { 
+        {
+            /*
             SpeechTextBlock.Text = "録音開始ボタンが押された";
             StartRecButton.IsEnabled = false;
             EndRecButton.IsEnabled = true;
 
             StreamingSpeechToText(e);
+            */
         }
 
         private void EndRecButton_Click(object sender, RoutedEventArgs e)
         {
-            SpeechTextBlock.Text = "録音終了ボタンが押された";
+            SpeechTextBlock.Text = "認識終了";
             EndRecButton.IsEnabled = false;
-            StartRecButton.IsEnabled = true;
+            MicrophoneSelectList.IsEnabled = true;
+            //StartRecButton.IsEnabled = true;
 
             if(cancellationToken != null)
             {
                 cancellationToken.Cancel();
             }
+        }
+
+        private void MicrophoneSelectList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            SpeechTextBlock.Text = "音声認識中・・・";
+            EndRecButton.IsEnabled = true;
+            MicrophoneSelectList.IsEnabled = false;
+
+            selectMicrophoneNubmer = MicrophoneSelectList.SelectedIndex;
+            StreamingSpeechToText(e);
+            
         }
 
         private async void StreamingSpeechToText(RoutedEventArgs e)
@@ -192,7 +204,6 @@ namespace GoogleCloudSpeechSample
 
             string lpcmFilePath = $@"C:\VoiceData\AITalkR{DateTime.Now.ToString("yyyyMMddHHmmss")}.lpcm";
             var sbResponseHeader = new StringBuilder();
-            var isSuccessResponse = false;
 
             using (HttpClient client = new HttpClient())
             {
@@ -216,7 +227,6 @@ namespace GoogleCloudSpeechSample
                     }
                     if(asyncSendTask.Result.StatusCode == HttpStatusCode.OK)
                     {
-                        isSuccessResponse = true;
                         var msgResponseBody = asyncSendTask.Result.Content;
                         var stmResponseBody = msgResponseBody.ReadAsStreamAsync().GetAwaiter().GetResult();
                         using(BinaryReader reader = new BinaryReader(stmResponseBody))
@@ -225,25 +235,35 @@ namespace GoogleCloudSpeechSample
                             using (FileStream lxFS = new FileStream(lpcmFilePath, FileMode.Create))
                             {
                                 lxFS.Write(lnByte, 0, lnByte.Length);
+                                Byte[] data = ConvertBytesEndian(lnByte);
+                                string filePath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + $@"\speech\{ DateTime.Now.ToString("yyyyMMddHHmmss")}.wav";
+                                //string filePath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) + @"\speech\test.wav";
+
+                                using (FileStream fileStream = new FileStream(filePath, FileMode.Create,FileAccess.Write))
+                                using (BinaryWriter binWriter = new BinaryWriter(fileStream))
+                                {
+                                    WaveHdr Hdr = new WaveHdr();
+
+                                    UInt32 DataLength = Hdr.SamplingRate * 10;
+
+                                    Hdr.NumberOfBytesOfWaveData = Hdr.BlockSize * DataLength;
+                                    binWriter.Write(Hdr.Bytes);
+                                    binWriter.Write(data);
+
+                                    //なんか音ならない
+                                    SoundPlayer player = null;
+                                    player = new SoundPlayer(filePath);
+                                    player.PlaySync();
+                                    Console.WriteLine("sound play success");
+                                }
                             }
                         }
+                        Console.WriteLine("success");
                     }
                 }catch(Exception ex)
                 {
-                    Console.WriteLine("エラー発生\n" + ex.Message);
+                    Console.WriteLine(this.Name + ex.Message);
                 }
-                finally
-                {
-                    if (isSuccessResponse)
-                    {
-                        Console.WriteLine($"【レスポンスヘッダ】\n{sbResponseHeader.ToString()}\n" + $"【レスポンスボディ】\n{lpcmFilePath}\n");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"【レスポンスヘッダ】\n{sbResponseHeader.ToString()}");
-                    }
-                }
-                Console.Read();
             }
         }
 
@@ -253,11 +273,18 @@ namespace GoogleCloudSpeechSample
             RequestTextToSpeech();
         }
 
-        private void MicrophoneSelectList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private byte[] ConvertBytesEndian(byte[] bytes)
         {
-            SpeechTextBlock.Text = "使用するマイクは" + MicrophoneSelectList.SelectedIndex + "番";
-            selectMicrophoneNubmer = MicrophoneSelectList.SelectedIndex;
+            byte[] newBytes = new byte[bytes.Length];
+            for(int i = 0; i < bytes.Length; i += 2)
+            {
+                newBytes[i] = bytes[i + 1];
+                newBytes[i + 1] = bytes[i];
+            }
+            return newBytes;
         }
+
+
     }
 }
 
