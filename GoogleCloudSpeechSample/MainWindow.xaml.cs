@@ -193,7 +193,7 @@ namespace GoogleCloudSpeechSample
             string textBySSML = @"<?xml version=""1.0"" encoding=""utf-8""?>
 <speak version=""1.1"">
     <voice name=""koutarou"">
-        <prosody pitch=""1.2"" volume=""1.1"">"
+        <prosody pitch=""1.0"" rate=""0.8"" volume=""1.0"">"
             + textBox.Text +
         @"</prosody>
     </voice>
